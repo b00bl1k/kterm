@@ -27,13 +27,13 @@ git clone https://git.kolibrios.org/b00bl1k/kterm.git
 
 With Tup (recommended):
 
-    ```sh
-    tup init
-    tup
-    ```
+```sh
+tup init
+tup
+```
 
 Or directly with FASM:
 
-    ```sh
-    fasm kterm.asm
-    ```
+```sh
+fasm kterm.asm
+```
