@@ -17,10 +17,18 @@ use32
 
 WIN_BORDER_WIDTH = 5
 FONT_HEIGHT = 16
+SCROLL_WIDTH = 16
+SCROLL_TOP = 34
+
 CONN_WIN_STACK_SIZE = 1024
+
 BTN_CLOSE = 1
 BTN_SETUP = 2
 BTN_CONN = 3
+BTN_SEND = 4
+
+BTN_OK = 2
+BTN_CANCEL = 3
 
 __DEBUG__ = 0
 __DEBUG_LEVEL__ = 0
@@ -32,6 +40,7 @@ include '../../dll.inc'
 include '../../debug-fdo.inc'
 include '../../develop/libraries/box_lib/trunk/box_lib.mac'
 include '../../../drivers/serial/common.inc'
+include 'textview.asm'
 include 'utils.asm'
 
 start:
@@ -46,7 +55,7 @@ start:
 
         call    .draw_window
 
-.loop:
+    .loop:
         mcall   SF_WAIT_EVENT
         dec     eax
         jz      .win
@@ -54,14 +63,17 @@ start:
         jz      .key
         dec     eax
         jz      .btn
+        invoke  edit_box_mouse, ed_send
+        invoke  scrollbar_mouse, vscroll
         jmp     .loop
-.win:
+    .win:
         call    .draw_window
         jmp     .loop
-.key:
+    .key:
         mcall   SF_GET_KEY
+        invoke  edit_box_key, ed_send
         jmp     .loop
-.btn:
+    .btn:
         mcall   SF_GET_BUTTON
         cmp     ah, BTN_CONN
         jne     @f
@@ -76,9 +88,9 @@ start:
     @@:
         cmp     ah, BTN_CLOSE
         jne     .loop
-.exit:
+    .exit:
         mcall   SF_TERMINATE_PROCESS
-.draw_window:
+    .draw_window:
         mcall   SF_STYLE_SETTINGS, SSF_GET_COLORS, sc, sizeof.system_colors
         mcall   SF_REDRAW, SSF_BEGIN_DRAW
 
@@ -95,6 +107,8 @@ start:
         mcall   SF_CREATE_WINDOW, <80, 400>, <100, 250>
 
         mcall   SF_THREAD_INFO, pi, -1
+
+        ; TODO limit minimum window size
 
         ; prevent drawing if the window is collapsed
         test    [pi.wnd_state], 0x04
@@ -114,7 +128,67 @@ start:
     @@:
         mcall   SF_PUT_IMAGE_EXT, , <20, 20>, <32, 7>, 1, icons.palette, 0
 
-        ; TODO limit minimum window size
+        ; text view
+        xor     eax, eax
+        mov     [text_view.left], eax
+        add     eax, SCROLL_TOP
+        mov     [text_view.top], eax
+        mov     eax, [pi.client_box.width]
+        sub     eax, SCROLL_WIDTH + 4
+        mov     [text_view.width], eax
+        mov     eax, [pi.client_box.height]
+        sub     eax, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 14 + SCROLL_TOP
+        mov     [text_view.height], eax
+        stdcall text_view_draw, text_view
+
+        ; scrollbar
+
+        mov     [vscroll.all_redraw], 1
+
+        mov     eax, [sc.work]
+        mov     [vscroll.bg_color], eax
+        mov     eax, [sc.work_button]
+        mov     [vscroll.front_color], eax
+        mov     eax, [sc.work_text]
+        mov     [vscroll.line_color], eax
+        mov     [vscroll.type], 0
+
+        mov     eax, [pi.client_box.width]
+        sub     eax, SCROLL_WIDTH + 2
+        mov     [vscroll.x_pos], ax
+        mov     eax, [pi.client_box.height]
+        sub     eax, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 14 + SCROLL_TOP
+        mov     [vscroll.y_size], ax
+
+        invoke  scrollbar_draw, vscroll
+
+        ; editbox and send button
+
+        edit_boxes_set_sys_color main_win_edits_start, main_win_edits_end, sc
+        mov     eax, [pi.client_box.width]
+        sub     eax, 46
+        mov     [ed_send.width], eax
+        mov     eax, [pi.client_box.height]
+        sub     eax, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 10
+        mov     [ed_send.top], eax
+        invoke  edit_box_draw, ed_send
+
+        mov     ebx, [pi.client_box.width]
+        sub     ebx, 42
+        shl     ebx, 16
+        add     ebx, 40
+        mov     ecx, [pi.client_box.height]
+        sub     ecx, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 10
+        shl     ecx, 16
+        add     ecx, FONT_HEIGHT + 4
+        mcall   SF_DEFINE_BUTTON, , , BTN_SEND, [sc.work_button]
+
+        add     ebx, 4 shl 16
+        mov     bx, word [pi.client_box.height]
+        sub     bx, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 7
+        mov     ecx, 0x90000000
+        or      ecx, [sc.work_button_text]
+        mcall   SF_DRAW_TEXT, , , send_label
 
         ; status bar
 
@@ -134,7 +208,7 @@ start:
         mov     edx, status_msg
         mcall   SF_DRAW_TEXT
 
-.end_redraw:
+    .end_redraw:
         mcall   SF_REDRAW, SSF_END_DRAW
         ret
 
@@ -155,7 +229,7 @@ show_conn_window:
         mov     [is_conn_win_opened], 1
     @@:
         ret
-.thread:
+    .thread:
         mcall   SF_SET_EVENTS_MASK, EVM_MOUSE + EVM_MOUSE_FILTER + EVM_REDRAW + EVM_BUTTON + EVM_KEY
 
         mov     eax, [port_num]
@@ -178,7 +252,7 @@ show_conn_window:
         mov     [ed_baud.size], eax
 
         call    .draw_window
-.loop:
+    .loop:
         mcall   SF_WAIT_EVENT
         dec     eax
         jz      .win
@@ -189,22 +263,22 @@ show_conn_window:
         invoke  edit_box_mouse, ed_port
         invoke  edit_box_mouse, ed_baud
         jmp     .loop
-.win:
+    .win:
         call    .draw_window
         jmp     .loop
-.key:
+    .key:
         mcall   SF_GET_KEY
         invoke  edit_box_key, ed_port
         invoke  edit_box_key, ed_baud
         jmp     .loop
-.btn:
+    .btn:
         mcall   SF_GET_BUTTON
-        cmp     ah, BTN_CLOSE
-        jne     .loop
+        ; cmp     ah, BTN_CLOSE
+        ; jne     .loop
         and     [is_conn_win_opened], 0
         mcall   SF_TERMINATE_PROCESS
 
-.draw_window:
+    .draw_window:
         mcall   SF_REDRAW, SSF_BEGIN_DRAW
 
         mov     edx, [sc.work]
@@ -235,9 +309,25 @@ show_conn_window:
         mov     edx, baud_label
         mcall   SF_DRAW_TEXT, <0, 45>
 
-        edit_boxes_set_sys_color win_conn_edits_start, win_conn_edits_end, sc
+        edit_boxes_set_sys_color conn_win_edits_start, conn_win_edits_end, sc
         invoke  edit_box_draw, ed_port
         invoke  edit_box_draw, ed_baud
+
+        mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 137, 60>, \
+                                  <CONN_WIN_HEIGHT - 55, 24>, BTN_OK, \
+                                  [sc.work_button]
+        
+        mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 71, 60>, \
+                                  <CONN_WIN_HEIGHT - 55, 24>, BTN_CANCEL, \
+                                  [sc.work_button]
+
+        mov     ecx, 0x90000000
+        or      ecx, [sc.work_button_text]
+        mcall   SF_DRAW_TEXT, <CONN_WIN_WIDTH - 114, CONN_WIN_HEIGHT - 50>, , ok_label
+
+        mov     ecx, 0x90000000
+        or      ecx, [sc.work_button_text]
+        mcall   SF_DRAW_TEXT, <CONN_WIN_WIDTH - 65, CONN_WIN_HEIGHT - 50>, , cancel_label
 
         mcall   SF_REDRAW, SSF_END_DRAW
         ret
@@ -250,16 +340,26 @@ library box_lib, 'box_lib.obj'
 import  box_lib,\
         edit_box_draw,          'edit_box_draw',\
         edit_box_key,           'edit_box_key',\
-        edit_box_mouse,         'edit_box_mouse'
+        edit_box_mouse,         'edit_box_mouse',\
+        scrollbar_draw,         'scrollbar_v_draw',\
+        scrollbar_mouse,        'scrollbar_v_mouse'
 
-win_conn_edits_start:
+conn_win_edits_start:
 ed_port         edit_box 80, CONN_WIN_WIDTH - 80 - 11, 10, 0xffffff, 0x6f9480, \
                          0, 0, 0x10000000, 6, ed_port_val, mouse_dd, \
                          ed_focus + ed_figure_only
 ed_baud         edit_box 80, CONN_WIN_WIDTH - 80 - 11, 42, 0xffffff, 0x6f9480, \
                          0, 0, 0x10000000, 6, ed_baud_val, mouse_dd, \
                          ed_figure_only
-win_conn_edits_end:
+conn_win_edits_end:
+main_win_edits_start:
+ed_send         edit_box 0, 0, 0, 0xffffff, 0x6f9480, \
+                         0, 0, 0x10000000, 10, ed_send_val, mouse_dd, \
+                         ed_focus, 0, 0
+main_win_edits_end:
+
+vscroll         scrollbar SCROLL_WIDTH, 0, 0, SCROLL_TOP, SCROLL_WIDTH, 0, 0, 0, 0, 0, 0, 5
+text_view       TEXT_VIEW
 
 is_connected    db 0
 is_conn_win_opened db 0
@@ -267,8 +367,12 @@ app_name        db 'kterm', 0
 conn_win_name   db 'Settings', 0
 port_label      db 'Port:', 0
 baud_label      db 'Baud:', 0
+ok_label        db 'Ok', 0
+cancel_label    db 'Cancel', 0
+send_label      db 'Send', 0
 status_msg      db ' ', 0
 port_num        dd 0
+ed_send_val     db 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 port_conf:
         dd      port_conf_end - port_conf
         dd      9600
