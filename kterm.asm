@@ -16,16 +16,19 @@ use32
         dd     0, 0             ; I_Param, I_Path
 
 WIN_BORDER_WIDTH = 5
+FONT_WIDTH = 8
 FONT_HEIGHT = 16
 SCROLL_WIDTH = 16
 SCROLL_TOP = 34
+ED_SEND_MAX_LEN = 256
 
 CONN_WIN_STACK_SIZE = 1024
 
 BTN_CLOSE = 1
 BTN_SETUP = 2
 BTN_CONN = 3
-BTN_SEND = 4
+BTN_CLEAR = 4
+BTN_SEND = 5
 
 BTN_OK = 2
 BTN_CANCEL = 3
@@ -53,6 +56,8 @@ start:
 
         mcall   SF_SET_EVENTS_MASK, EVM_MOUSE + EVM_MOUSE_FILTER + EVM_REDRAW + EVM_BUTTON + EVM_KEY
 
+        mov     byte [ed_send_val], 0
+        stdcall text_view_init, text_view
         call    .draw_window
 
     .loop:
@@ -86,6 +91,16 @@ start:
         call    show_conn_window
         jmp     .loop
     @@:
+        cmp     ah, BTN_CLEAR
+        jne     @f
+        ; TODO
+        jmp     .loop
+    @@:
+        cmp     ah, BTN_SEND
+        jne     @f
+        call    send_text
+        jmp     .loop
+    @@:
         cmp     ah, BTN_CLOSE
         jne     .loop
     .exit:
@@ -116,7 +131,7 @@ start:
 
         mcall   SF_DEFINE_BUTTON, <1, 24>, <5, 24>, BTN_SETUP, [sc.work_light]
         mcall   SF_DEFINE_BUTTON, <30, 24>, <5, 24>, BTN_CONN, [sc.work_light]
-        mcall   SF_DEFINE_BUTTON, <59, 24>, <5, 24>, 123, [sc.work_light]
+        mcall   SF_DEFINE_BUTTON, <59, 24>, <5, 24>, BTN_CLEAR, [sc.work_light]
 
         mcall   SF_PUT_IMAGE_EXT, icons, <20, 20>, <3, 7>, 1, icons.palette, 0
 
@@ -129,6 +144,11 @@ start:
         mcall   SF_PUT_IMAGE_EXT, , <20, 20>, <32, 7>, 1, icons.palette, 0
 
         ; text view
+        mov     eax, [sc.work_light]
+        mov     [text_view.bg_color], eax
+        mov     eax, [sc.work_text]
+        mov     [text_view.fg_color], eax
+
         xor     eax, eax
         mov     [text_view.left], eax
         add     eax, SCROLL_TOP
@@ -316,7 +336,7 @@ show_conn_window:
         mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 137, 60>, \
                                   <CONN_WIN_HEIGHT - 55, 24>, BTN_OK, \
                                   [sc.work_button]
-        
+
         mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 71, 60>, \
                                   <CONN_WIN_HEIGHT - 55, 24>, BTN_CANCEL, \
                                   [sc.work_button]
@@ -332,6 +352,16 @@ show_conn_window:
         mcall   SF_REDRAW, SSF_END_DRAW
         ret
 
+send_text:
+    stdcall text_view_append_line, text_view, ed_send_val
+    xor     eax, eax
+    push    eax
+    invoke  edit_box_set_text, ed_send, esp
+    pop     eax
+    stdcall text_view_draw, text_view
+    invoke  edit_box_draw, ed_send
+    ret
+
 align 16
 @IMPORT:
 
@@ -341,6 +371,7 @@ import  box_lib,\
         edit_box_draw,          'edit_box_draw',\
         edit_box_key,           'edit_box_key',\
         edit_box_mouse,         'edit_box_mouse',\
+        edit_box_set_text,      'edit_box_set_text',\
         scrollbar_draw,         'scrollbar_v_draw',\
         scrollbar_mouse,        'scrollbar_v_mouse'
 
@@ -354,7 +385,7 @@ ed_baud         edit_box 80, CONN_WIN_WIDTH - 80 - 11, 42, 0xffffff, 0x6f9480, \
 conn_win_edits_end:
 main_win_edits_start:
 ed_send         edit_box 0, 0, 0, 0xffffff, 0x6f9480, \
-                         0, 0, 0x10000000, 10, ed_send_val, mouse_dd, \
+                         0, 0, 0x10000000, ED_SEND_MAX_LEN - 1, ed_send_val, mouse_dd, \
                          ed_focus, 0, 0
 main_win_edits_end:
 
@@ -372,7 +403,6 @@ cancel_label    db 'Cancel', 0
 send_label      db 'Send', 0
 status_msg      db ' ', 0
 port_num        dd 0
-ed_send_val     db 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 port_conf:
         dd      port_conf_end - port_conf
         dd      9600
@@ -405,6 +435,7 @@ icons:
 i_end:
 ed_port_val     rb 7
 ed_baud_val     rb 7
+ed_send_val     rb ED_SEND_MAX_LEN
 mouse_dd        dd ?
 conn_win_pid    dd ?
 sc              system_colors
