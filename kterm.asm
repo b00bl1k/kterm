@@ -33,7 +33,7 @@ BTN_SEND = 5
 BTN_OK = 2
 BTN_CANCEL = 3
 
-__DEBUG__ = 0
+__DEBUG__ = 1
 __DEBUG_LEVEL__ = 0
 
 include '../../proc32.inc'
@@ -43,8 +43,8 @@ include '../../dll.inc'
 include '../../debug-fdo.inc'
 include '../../develop/libraries/box_lib/trunk/box_lib.mac'
 include '../../../drivers/serial/common.inc'
-include 'textview.asm'
-include 'utils.asm'
+include 'textview.inc'
+include 'utils.inc'
 
 start:
         mcall   SF_SYS_MISC, SSF_HEAP_INIT
@@ -54,7 +54,7 @@ start:
         or      eax, eax
         jnz     .exit
 
-        mcall   SF_SET_EVENTS_MASK, EVM_MOUSE + EVM_MOUSE_FILTER + EVM_REDRAW + EVM_BUTTON + EVM_KEY
+        mcall   SF_SET_EVENTS_MASK, EVM_MOUSE + EVM_REDRAW + EVM_BUTTON + EVM_KEY
 
         mov     byte [ed_send_val], 0
         stdcall text_view_init, text_view
@@ -69,7 +69,16 @@ start:
         dec     eax
         jz      .btn
         invoke  edit_box_mouse, ed_send
+        push    [vscroll.position]
         invoke  scrollbar_mouse, vscroll
+        pop     eax
+        cmp     eax, [vscroll.position]
+        je      @f
+        mov     eax, [vscroll.position]
+        mov     [text_view.curr_line], eax
+        DEBUGF  0, "vscroll.position=%d\n", eax
+        stdcall text_view_draw, text_view
+  @@:
         jmp     .loop
     .win:
         call    .draw_window
@@ -93,7 +102,10 @@ start:
     @@:
         cmp     ah, BTN_CLEAR
         jne     @f
-        ; TODO
+        stdcall text_view_clear, text_view
+        stdcall text_view_draw, text_view
+        call    update_vscroll
+        invoke  scrollbar_draw, vscroll
         jmp     .loop
     @@:
         cmp     ah, BTN_SEND
@@ -134,6 +146,7 @@ start:
         mcall   SF_DEFINE_BUTTON, <59, 24>, <5, 24>, BTN_CLEAR, [sc.work_light]
 
         mcall   SF_PUT_IMAGE_EXT, icons, <20, 20>, <3, 7>, 1, icons.palette, 0
+        mcall   SF_PUT_IMAGE_EXT, icons + 180, <20, 20>, <61, 7>, 1, icons.palette, 0
 
         mov     ebx, icons + 60 ; disconnected icon
         mov     al, [is_connected]
@@ -180,6 +193,7 @@ start:
         sub     eax, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 14 + SCROLL_TOP
         mov     [vscroll.y_size], ax
 
+        call    update_vscroll
         invoke  scrollbar_draw, vscroll
 
         ; editbox and send button
@@ -352,15 +366,29 @@ show_conn_window:
         mcall   SF_REDRAW, SSF_END_DRAW
         ret
 
-send_text:
-    stdcall text_view_append_line, text_view, ed_send_val
-    xor     eax, eax
-    push    eax
-    invoke  edit_box_set_text, ed_send, esp
-    pop     eax
-    stdcall text_view_draw, text_view
-    invoke  edit_box_draw, ed_send
-    ret
+
+proc send_text
+        stdcall text_view_append_line, text_view, ed_send_val
+        xor     eax, eax
+        push    eax
+        invoke  edit_box_set_text, ed_send, esp
+        pop     eax
+        stdcall text_view_draw, text_view
+        invoke  edit_box_draw, ed_send
+        call    update_vscroll
+        invoke  scrollbar_draw, vscroll
+        ret
+endp
+
+proc update_vscroll
+        mov     eax, [text_view.total_lines]
+        mov     [vscroll.max_area], eax
+        mov     eax, [text_view.rows]
+        mov     [vscroll.cur_area], eax
+        mov     eax, [text_view.curr_line]
+        mov     [vscroll.position], eax
+        ret
+endp
 
 align 16
 @IMPORT:
@@ -409,14 +437,14 @@ port_conf:
         db      8, 1, SERIAL_CONF_PARITY_NONE, SERIAL_CONF_FLOW_CTRL_NONE
 port_conf_end:
 
-if __DEBUG__ eq 1
+;if __DEBUG__ eq 1
     include_debug_strings
-end if
+;end if
 
 ; https://javl.github.io/image2cpp/
 icons:
-    ; 'icons', 20x60px
-    db 0xff, 0xff, 0xf0, 0xfc, 0xff, 0xf0, 0xf8, 0x3f, 0xf0, 0xf8, 0x1f, 0xf0, 0xfe, 0x1f, 0xf0, 0xdf
+    ; 'icons', 20x80px
+    db 0xff, 0xff, 0xf0, 0xfc, 0x7f, 0xf0, 0xf8, 0x3f, 0xf0, 0xf8, 0x1f, 0xf0, 0xfe, 0x1f, 0xf0, 0xdf
     db 0x1f, 0xf0, 0x8e, 0x1f, 0xf0, 0xa4, 0x3f, 0xf0, 0x90, 0x1f, 0xf0, 0xc8, 0x0f, 0xf0, 0xe0, 0x07
     db 0xf0, 0xfe, 0x43, 0xf0, 0xff, 0x21, 0xf0, 0xff, 0x90, 0xf0, 0xff, 0xc8, 0x70, 0xff, 0xe4, 0x30
     db 0xff, 0xf0, 0x70, 0xff, 0xf8, 0xf0, 0xff, 0xfd, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff
@@ -427,7 +455,10 @@ icons:
     db 0xf0, 0xff, 0xff, 0xf0, 0xff, 0x9f, 0xf0, 0xff, 0x0f, 0xf0, 0xfe, 0x07, 0xf0, 0xfe, 0x07, 0xf0
     db 0xfc, 0x03, 0xf0, 0x80, 0x00, 0x10, 0x80, 0x00, 0x10, 0xfc, 0x03, 0xf0, 0xfe, 0x07, 0xf0, 0xfe
     db 0x07, 0xf0, 0xff, 0x0f, 0xf0, 0xff, 0x9f, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff
-    db 0xf0, 0xff, 0xff, 0xf0
+    db 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xe3, 0xf0
+    db 0xff, 0xc9, 0xf0, 0xff, 0x9c, 0xf0, 0xff, 0x3e, 0x70, 0xfe, 0x7f, 0x70, 0xfc, 0x7f, 0x70, 0xf9
+    db 0x3e, 0x70, 0xf3, 0x9c, 0xf0, 0xe7, 0xc9, 0xf0, 0xef, 0xe3, 0xf0, 0xe7, 0xe7, 0xf0, 0xf3, 0xcf
+    db 0xf0, 0xf9, 0x9f, 0xf0, 0xfc, 0x00, 0x70, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0
 .palette:
     dd 0xffffff
     dd 0x000000

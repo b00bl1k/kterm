@@ -2,6 +2,8 @@
 
 Simple serial terminal for KolibriOS.
 
+![screenshot](screenshot.png)
+
 # Requirements
 
 - [Fasm](https://flatassembler.net/) 1.7x
