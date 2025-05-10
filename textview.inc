@@ -49,11 +49,9 @@ proc text_view_draw stdcall uses ebx esi edi, text_view:dword
         mov     esi, [text_view]
         call    tv.draw_frame_and_bg
         call    tv.calc_rows_and_cols
-        DEBUGF  0, "text_view rows=%d cols=%d\n", [esi + TEXT_VIEW.rows], [esi + TEXT_VIEW.cols]
 
         mov     eax, [esi + TEXT_VIEW.curr_line]
         mov     ebx, [esi + TEXT_VIEW.total_lines]
-        DEBUGF  0, "text_view curr_line=%d total_lines=%d\n", eax, ebx
         sub     ebx, eax
         cmp     ebx, [esi + TEXT_VIEW.rows]
         jbe     @f

@@ -20,7 +20,10 @@ FONT_WIDTH = 8
 FONT_HEIGHT = 16
 SCROLL_WIDTH = 16
 SCROLL_TOP = 34
+RX_BUF_SIZE = 256
 ED_SEND_MAX_LEN = 256
+
+KEY_ENTER = 13
 
 CONN_WIN_STACK_SIZE = 1024
 
@@ -33,7 +36,7 @@ BTN_SEND = 5
 BTN_OK = 2
 BTN_CANCEL = 3
 
-__DEBUG__ = 1
+__DEBUG__ = 0
 __DEBUG_LEVEL__ = 0
 
 include '../../proc32.inc'
@@ -61,24 +64,23 @@ start:
         call    .draw_window
 
     .loop:
-        mcall   SF_WAIT_EVENT
-        dec     eax
+        mov     eax, SF_WAIT_EVENT
+        cmp     [is_connected], 0
+        jz      @f
+        mov     eax, SF_WAIT_EVENT_TIMEOUT
+        mov     ebx, 100
+    @@:
+        mcall
+        cmp     eax, EV_REDRAW
         jz      .win
-        dec     eax
+        cmp     eax, EV_KEY
         jz      .key
-        dec     eax
+        cmp     eax, EV_BUTTON
         jz      .btn
-        invoke  edit_box_mouse, ed_send
-        push    [vscroll.position]
-        invoke  scrollbar_mouse, vscroll
-        pop     eax
-        cmp     eax, [vscroll.position]
-        je      @f
-        mov     eax, [vscroll.position]
-        mov     [text_view.curr_line], eax
-        DEBUGF  0, "vscroll.position=%d\n", eax
-        stdcall text_view_draw, text_view
-  @@:
+        cmp     eax, EV_MOUSE
+        jz      .mouse
+    .timer:
+        call    check_port
         jmp     .loop
     .win:
         call    .draw_window
@@ -86,12 +88,16 @@ start:
     .key:
         mcall   SF_GET_KEY
         invoke  edit_box_key, ed_send
+        cmp     ah, KEY_ENTER
+        jne     @f
+        call    send_text
+    @@:
         jmp     .loop
     .btn:
         mcall   SF_GET_BUTTON
         cmp     ah, BTN_CONN
         jne     @f
-        xor     [is_connected], 0xff
+        call    btn_conn_click
         call    .draw_window
         jmp     .loop
     @@:
@@ -117,6 +123,19 @@ start:
         jne     .loop
     .exit:
         mcall   SF_TERMINATE_PROCESS
+    .mouse:
+        invoke  edit_box_mouse, ed_send
+        push    [vscroll.position]
+        invoke  scrollbar_mouse, vscroll
+        pop     eax
+        cmp     eax, [vscroll.position]
+        je      .loop
+        mov     eax, [vscroll.position]
+        cmp     eax, [text_view.total_lines]
+        jae     .loop
+        mov     [text_view.curr_line], eax
+        stdcall text_view_draw, text_view
+        jmp     .loop
     .draw_window:
         mcall   SF_STYLE_SETTINGS, SSF_GET_COLORS, sc, sizeof.system_colors
         mcall   SF_REDRAW, SSF_BEGIN_DRAW
@@ -239,7 +258,7 @@ start:
         sub     ebx, FONT_HEIGHT
         mov     ecx, 0x90000000
         or      ecx, [sc.work_text]
-        mov     edx, status_msg
+        mov     edx, [status_msg]
         mcall   SF_DRAW_TEXT
 
     .end_redraw:
@@ -368,6 +387,16 @@ show_conn_window:
 
 
 proc send_text
+        ; check for empty string
+        cmp     byte [ed_send_val], 0
+        jz      .exit
+        cmp     [is_connected], 0
+        jz      .exit
+        mov     esi, ed_send_val
+        call    strlen
+        mov     [tx_buf_cnt], eax
+        stdcall serial_port_write, [port_handle], ed_send_val, tx_buf_cnt
+        ; TODO check for errors and actual size of written data
         stdcall text_view_append_line, text_view, ed_send_val
         xor     eax, eax
         push    eax
@@ -377,6 +406,7 @@ proc send_text
         invoke  edit_box_draw, ed_send
         call    update_vscroll
         invoke  scrollbar_draw, vscroll
+    .exit:
         ret
 endp
 
@@ -387,6 +417,54 @@ proc update_vscroll
         mov     [vscroll.cur_area], eax
         mov     eax, [text_view.curr_line]
         mov     [vscroll.position], eax
+        ret
+endp
+
+proc btn_conn_click
+        cmp     [is_connected], 0
+        jnz     .close
+        lea     eax, [port_conf]
+        lea     ebx, [port_handle]
+        stdcall serial_port_open, [port_num], eax, ebx
+        mov     [status_msg], err_none
+        test    eax, eax
+        jz      .opened
+        mov     [status_msg], err_port
+        cmp     eax, SERIAL_API_ERR_PORT_INVALID
+        jz      .exit
+        mov     [status_msg], err_busy
+        cmp     eax, SERIAL_API_ERR_PORT_BUSY
+        jz      .exit
+        mov     [status_msg], err_conf
+        cmp     eax, SERIAL_API_ERR_CONF
+        jz      .exit
+        mov     [status_msg], err_unknown
+        jmp     .exit
+    .opened:
+        mov     [is_connected], 1
+        jmp     .exit
+    .close:
+        stdcall serial_port_close, [port_handle]
+        and     [is_connected], 0
+    .exit:
+        ret
+endp
+
+proc check_port
+        mov     [rx_buf_cnt], RX_BUF_SIZE - 1
+        stdcall serial_port_read, [port_handle], rx_buf, rx_buf_cnt
+        ; TODO check eax for errors
+        mov     eax, [rx_buf_cnt]
+        test    eax, eax
+        jz      .exit
+        ; TODO escape non-print chars
+        lea     esi, [rx_buf + eax]
+        mov     byte [esi], 0
+        stdcall text_view_append_line, text_view, rx_buf
+        stdcall text_view_draw, text_view
+        call    update_vscroll
+        invoke  scrollbar_draw, vscroll
+    .exit:
         ret
 endp
 
@@ -414,10 +492,10 @@ conn_win_edits_end:
 main_win_edits_start:
 ed_send         edit_box 0, 0, 0, 0xffffff, 0x6f9480, \
                          0, 0, 0x10000000, ED_SEND_MAX_LEN - 1, ed_send_val, mouse_dd, \
-                         ed_focus, 0, 0
+                         ed_focus + ed_always_focus, 0, 0
 main_win_edits_end:
 
-vscroll         scrollbar SCROLL_WIDTH, 0, 0, SCROLL_TOP, SCROLL_WIDTH, 0, 0, 0, 0, 0, 0, 5
+vscroll         scrollbar SCROLL_WIDTH, 0, 0, SCROLL_TOP, SCROLL_WIDTH, 0, 0, 0, 0, 0, 0, 1
 text_view       TEXT_VIEW
 
 is_connected    db 0
@@ -429,7 +507,13 @@ baud_label      db 'Baud:', 0
 ok_label        db 'Ok', 0
 cancel_label    db 'Cancel', 0
 send_label      db 'Send', 0
-status_msg      db ' ', 0
+status_msg      dd err_none
+err_none        db 0
+err_port        db 'Invalid serial port.', 0
+err_busy        db 'The port is already in use.', 0
+err_conf        db 'Invalid port configuration.', 0
+err_unknown     db 'An unknown error occured.', 0
+
 port_num        dd 0
 port_conf:
         dd      port_conf_end - port_conf
@@ -437,9 +521,9 @@ port_conf:
         db      8, 1, SERIAL_CONF_PARITY_NONE, SERIAL_CONF_FLOW_CTRL_NONE
 port_conf_end:
 
-;if __DEBUG__ eq 1
+if __DEBUG__ eq 1
     include_debug_strings
-;end if
+end if
 
 ; https://javl.github.io/image2cpp/
 icons:
@@ -469,6 +553,10 @@ ed_baud_val     rb 7
 ed_send_val     rb ED_SEND_MAX_LEN
 mouse_dd        dd ?
 conn_win_pid    dd ?
+port_handle     dd ?
+rx_buf          rb RX_BUF_SIZE
+rx_buf_cnt      dd ?
+tx_buf_cnt      dd ?
 sc              system_colors
 pi              process_information
 conn_win_stack  rb CONN_WIN_STACK_SIZE
