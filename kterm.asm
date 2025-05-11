@@ -21,6 +21,8 @@ FONT_HEIGHT = 16
 SCROLL_WIDTH = 16
 SCROLL_TOP = 34
 RX_BUF_SIZE = 256
+LINE_HEADER_LEN = 11
+PORT_STATUS_LEN = 128
 ED_SEND_MAX_LEN = 256
 
 KEY_ENTER = 13
@@ -267,7 +269,7 @@ start:
 
 CONN_WIN_WIDTH = 200
 CONN_WIN_HEIGHT = 250
-show_conn_window:
+proc show_conn_window
         cmp     [is_conn_win_opened], 1
         jne     @f
         mcall   SF_SYSTEM, SSF_GET_THREAD_SLOT, [conn_win_pid]
@@ -326,8 +328,15 @@ show_conn_window:
         jmp     .loop
     .btn:
         mcall   SF_GET_BUTTON
-        ; cmp     ah, BTN_CLOSE
-        ; jne     .loop
+        cmp     ah, BTN_OK
+        jne     @f
+        mov     esi, ed_port_val
+        call    str_to_uint
+        mov     [port_num], ebx
+        mov     esi, ed_baud_val
+        call    str_to_uint
+        mov     [port_conf + 4], ebx
+    @@:
         and     [is_conn_win_opened], 0
         mcall   SF_TERMINATE_PROCESS
 
@@ -384,7 +393,7 @@ show_conn_window:
 
         mcall   SF_REDRAW, SSF_END_DRAW
         ret
-
+endp
 
 proc send_text
         ; check for empty string
@@ -392,12 +401,15 @@ proc send_text
         jz      .exit
         cmp     [is_connected], 0
         jz      .exit
-        mov     esi, ed_send_val
+        or      eax, 1
+        mov     edi, ed_send_header
+        call    make_line_header
+        mov     esi, ed_send_header
         call    strlen
         mov     [tx_buf_cnt], eax
-        stdcall serial_port_write, [port_handle], ed_send_val, tx_buf_cnt
+        stdcall serial_port_write, [port_handle], ed_send_header, tx_buf_cnt
         ; TODO check for errors and actual size of written data
-        stdcall text_view_append_line, text_view, ed_send_val
+        stdcall text_view_append_line, text_view, ed_send_header
         xor     eax, eax
         push    eax
         invoke  edit_box_set_text, ed_send, esp
@@ -442,10 +454,29 @@ proc btn_conn_click
         jmp     .exit
     .opened:
         mov     [is_connected], 1
+        mov     esi, port_label
+        mov     edi, port_status
+        mov     ecx, 4
+        cld
+        rep     movsb
+        mov     eax, [port_num]
+        mov     ecx, 10
+        call    int_to_str
+        mov     al, ' '
+        stosb
+        mov     eax, [port_conf + 4]
+        mov     ecx, 10
+        call    int_to_str
+        mov     eax, ' 8n1'
+        stosd
+        xor     al, al
+        stosb
+        mov     [status_msg], port_status
         jmp     .exit
     .close:
         stdcall serial_port_close, [port_handle]
         and     [is_connected], 0
+        mov     [status_msg], err_none
     .exit:
         ret
 endp
@@ -460,11 +491,52 @@ proc check_port
         ; TODO escape non-print chars
         lea     esi, [rx_buf + eax]
         mov     byte [esi], 0
-        stdcall text_view_append_line, text_view, rx_buf
+        xor     eax, eax
+        mov     edi, rx_header
+        call    make_line_header
+        stdcall text_view_append_line, text_view, rx_header
         stdcall text_view_draw, text_view
         call    update_vscroll
         invoke  scrollbar_draw, vscroll
     .exit:
+        ret
+endp
+
+proc make_line_header
+; eax = 0 - rx, 1 - tx
+; edi = dest buf
+        push    eax
+        mcall   SF_GET_SYS_TIME
+        mov     ebx, eax
+        mov     ecx, 3
+        ; BCD timestamp to string
+    .loop:
+        mov     al, bl
+        shr     al, 4
+        add     al, '0'
+        stosb
+        mov     al, bl
+        and     al, 0x0f
+        add     al, '0'
+        stosb
+        dec     ecx
+        jz      .done
+        mov     al, ':'
+        stosb
+        shr     ebx, 8
+        jmp     .loop
+    .done:
+        mov     al, ' '
+        stosb
+        mov     al, '<'
+        pop     ebx
+        test    ebx, ebx
+        jz      @f
+        mov     al, '>'
+    @@:
+        stosb
+        mov     al, ' '
+        stosb
         ret
 endp
 
@@ -513,7 +585,6 @@ err_port        db 'Invalid serial port.', 0
 err_busy        db 'The port is already in use.', 0
 err_conf        db 'Invalid port configuration.', 0
 err_unknown     db 'An unknown error occured.', 0
-
 port_num        dd 0
 port_conf:
         dd      port_conf_end - port_conf
@@ -550,10 +621,13 @@ icons:
 i_end:
 ed_port_val     rb 7
 ed_baud_val     rb 7
+ed_send_header  rb LINE_HEADER_LEN
 ed_send_val     rb ED_SEND_MAX_LEN
 mouse_dd        dd ?
 conn_win_pid    dd ?
 port_handle     dd ?
+port_status     rb PORT_STATUS_LEN
+rx_header       rb LINE_HEADER_LEN
 rx_buf          rb RX_BUF_SIZE
 rx_buf_cnt      dd ?
 tx_buf_cnt      dd ?

@@ -37,7 +37,7 @@ proc int_to_str
         jns     @f
         mov     byte [edi], '-'
         inc     edi
-    @@: 
+    @@:
         call    .recurse
         pop     edx ecx
         ret
@@ -49,7 +49,7 @@ proc int_to_str
         push    edx
         call    .recurse
         pop     eax
-    @@: 
+    @@:
         cmp     al, 10
         sbb     al, 0x69
         das
@@ -72,5 +72,17 @@ proc strlen
         sub     eax, ebx
         dec     eax
         pop     ebx
+        ret
+endp
+
+proc strcpy
+; esi = source
+; edi = destination
+        cld
+    @@:
+        lodsb
+        stosb
+        test    al, al
+        jnz     @b
         ret
 endp
