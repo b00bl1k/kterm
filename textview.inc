@@ -1,6 +1,13 @@
+; Copyright (C) KolibriOS team 2025. All rights reserved.
+; Distributed under terms of the GNU General Public License
+;
+; GNU GENERAL PUBLIC LICENSE
+; Version 2, June 1991
+
 BUF_SIZE = 4096
 FRM_WIDTH = 1
 MARGIN = 1
+TV_FLAG_AUTOSCROLL = 1
 
 struct  TEXT_VIEW
         left        dd ?
@@ -84,7 +91,8 @@ proc text_view_draw stdcall uses ebx esi edi, text_view:dword
         ret
 endp
 
-proc text_view_append_line stdcall uses ebx esi edi, text_view:dword, string:dword
+proc text_view_append_line stdcall uses ebx esi edi, text_view:dword, \
+                           string:dword, flags:dword
         mov     esi, [string]
         call    strlen
         inc     eax ; include \0
@@ -116,9 +124,18 @@ proc text_view_append_line stdcall uses ebx esi edi, text_view:dword, string:dwo
         mov     edi, [esi + TEXT_VIEW.buf_data]
         add     edi, [esi + TEXT_VIEW.data_size]
         add     [esi + TEXT_VIEW.data_size], ecx
+        push    esi
         mov     esi, [string]
         cld
         rep     movsb
+        pop     esi
+        mov     eax, [flags]
+        test    eax, TV_FLAG_AUTOSCROLL
+        jz      .exit
+        mov     eax, [esi + TEXT_VIEW.total_lines]
+        sub     eax, [esi + TEXT_VIEW.rows]
+        jl      .exit
+        mov     [esi + TEXT_VIEW.curr_line], eax
     .exit:
         ret
 endp

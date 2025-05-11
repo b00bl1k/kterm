@@ -53,7 +53,13 @@ include 'utils.inc'
 
 start:
         mcall   SF_SYS_MISC, SSF_HEAP_INIT
+
         call    serial_port_init
+        test    eax, eax
+        jnz     @f
+        mov     eax, err_driver
+        mov     [status_msg], eax
+    @@:
 
         stdcall dll.Load, @IMPORT
         or      eax, eax
@@ -409,7 +415,7 @@ proc send_text
         mov     [tx_buf_cnt], eax
         stdcall serial_port_write, [port_handle], ed_send_header, tx_buf_cnt
         ; TODO check for errors and actual size of written data
-        stdcall text_view_append_line, text_view, ed_send_header
+        stdcall text_view_append_line, text_view, ed_send_header, TV_FLAG_AUTOSCROLL
         xor     eax, eax
         push    eax
         invoke  edit_box_set_text, ed_send, esp
@@ -438,7 +444,7 @@ proc btn_conn_click
         lea     eax, [port_conf]
         lea     ebx, [port_handle]
         stdcall serial_port_open, [port_num], eax, ebx
-        mov     [status_msg], err_none
+        mov     [status_msg], status_ver
         test    eax, eax
         jz      .opened
         mov     [status_msg], err_port
@@ -476,7 +482,7 @@ proc btn_conn_click
     .close:
         stdcall serial_port_close, [port_handle]
         and     [is_connected], 0
-        mov     [status_msg], err_none
+        mov     [status_msg], status_ver
     .exit:
         ret
 endp
@@ -494,7 +500,7 @@ proc check_port
         xor     eax, eax
         mov     edi, rx_header
         call    make_line_header
-        stdcall text_view_append_line, text_view, rx_header
+        stdcall text_view_append_line, text_view, rx_header, TV_FLAG_AUTOSCROLL
         stdcall text_view_draw, text_view
         call    update_vscroll
         invoke  scrollbar_draw, vscroll
@@ -579,12 +585,13 @@ baud_label      db 'Baud:', 0
 ok_label        db 'Ok', 0
 cancel_label    db 'Cancel', 0
 send_label      db 'Send', 0
-status_msg      dd err_none
-err_none        db 0
+status_msg      dd status_ver
+status_ver      db 'v0.1.0', 0
 err_port        db 'Invalid serial port.', 0
 err_busy        db 'The port is already in use.', 0
 err_conf        db 'Invalid port configuration.', 0
 err_unknown     db 'An unknown error occured.', 0
+err_driver      db 'Error loading driver serial.sys.', 0
 port_num        dd 0
 port_conf:
         dd      port_conf_end - port_conf
