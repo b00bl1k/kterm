@@ -15,6 +15,8 @@ use32
         dd     (i_end + 0x1000) ; esp
         dd     0, 0             ; I_Param, I_Path
 
+WIN_MIN_WIDTH = 150
+WIN_MIN_HEIGHT = 200
 WIN_BORDER_WIDTH = 5
 FONT_WIDTH = 8
 FONT_HEIGHT = 16
@@ -162,11 +164,37 @@ start:
 
         mcall   SF_THREAD_INFO, pi, -1
 
-        ; TODO limit minimum window size
-
         ; prevent drawing if the window is collapsed
         test    [pi.wnd_state], 0x04
         jnz     .end_redraw
+
+        ; prevent resize if smaller
+        xor     eax, eax
+        mov     ebx, [pi.box.width]
+        mov     ecx, [pi.box.height]
+        mov     edx, [pi.client_box.width]
+        mov     esi, [pi.client_box.height]
+        sub     ebx, edx
+        sub     ecx, esi
+
+        cmp     edx, WIN_MIN_WIDTH
+        jae     .width_ok
+        inc     eax
+        mov     edx, WIN_MIN_WIDTH
+    .width_ok:
+        add     edx, ebx
+
+        cmp     esi, WIN_MIN_HEIGHT
+        jae     .height_ok
+        inc     eax
+        mov     esi, WIN_MIN_HEIGHT
+    .height_ok:
+        add     esi, ecx
+        test    eax, eax
+        jz      @f
+        mcall   SF_CHANGE_WINDOW, -1, -1
+        jmp     .end_redraw
+    @@:
 
         mcall   SF_DEFINE_BUTTON, <1, 24>, <5, 24>, BTN_SETUP, [sc.work_light]
         mcall   SF_DEFINE_BUTTON, <30, 24>, <5, 24>, BTN_CONN, [sc.work_light]
@@ -410,10 +438,10 @@ proc send_text
         or      eax, 1
         mov     edi, ed_send_header
         call    make_line_header
-        mov     esi, ed_send_header
+        mov     esi, ed_send_val
         call    strlen
         mov     [tx_buf_cnt], eax
-        stdcall serial_port_write, [port_handle], ed_send_header, tx_buf_cnt
+        stdcall serial_port_write, [port_handle], ed_send_val, tx_buf_cnt
         ; TODO check for errors and actual size of written data
         stdcall text_view_append_line, text_view, ed_send_header, TV_FLAG_AUTOSCROLL
         xor     eax, eax
@@ -586,7 +614,7 @@ ok_label        db 'Ok', 0
 cancel_label    db 'Cancel', 0
 send_label      db 'Send', 0
 status_msg      dd status_ver
-status_ver      db 'v0.1.0', 0
+status_ver      db 'v0.1.1', 0
 err_port        db 'Invalid serial port.', 0
 err_busy        db 'The port is already in use.', 0
 err_conf        db 'Invalid port configuration.', 0
