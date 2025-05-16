@@ -17,6 +17,7 @@ struct  TEXT_VIEW
 
         bg_color    dd ?
         fg_color    dd ?
+        text_color  dd ?
 
         buf_data    dd ?
         buf_size    dd ?
@@ -207,7 +208,7 @@ proc tv.draw_single_line uses esi
 ; edi = pointer to the first byte of string in [text_view.buf_data]
 ; return: eax = length of the string
         mov     ecx, 0x10000000 ; fixed-length string
-        or      ecx, [esi + TEXT_VIEW.fg_color]
+        or      ecx, [esi + TEXT_VIEW.text_color]
         push    esi
         mov     esi, edi
         call    strlen

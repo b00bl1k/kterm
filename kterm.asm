@@ -15,13 +15,17 @@ use32
         dd     (i_end + 0x1000) ; esp
         dd     0, 0             ; I_Param, I_Path
 
+WIN_MARGIN = 5
 WIN_MIN_WIDTH = 150
 WIN_MIN_HEIGHT = 200
-WIN_BORDER_WIDTH = 5
+TOOL_ICON_SIZE = 18
+TOOL_BTN_SIZE = 24 ; width and height
+SEND_BTN_WIDTH = 40
+ED_HEIGHT = 22
 FONT_WIDTH = 8
 FONT_HEIGHT = 16
 SCROLL_WIDTH = 16
-SCROLL_TOP = 34
+SCROLL_TOP = WIN_MARGIN + TOOL_BTN_SIZE + WIN_MARGIN
 RX_BUF_SIZE = 256
 LINE_HEADER_LEN = 11
 PORT_STATUS_LEN = 128
@@ -30,6 +34,12 @@ ED_SEND_MAX_LEN = 256
 KEY_ENTER = 13
 
 CONN_WIN_STACK_SIZE = 1024
+
+IMG_RGB_METADATA_SIZE = 8
+ICON_SIZE_BYTES = TOOL_ICON_SIZE * TOOL_ICON_SIZE * 3
+ICON_SETUP_OFFSET = IMG_RGB_METADATA_SIZE + ICON_SIZE_BYTES * 60
+ICON_CONN_OFFSET = IMG_RGB_METADATA_SIZE + ICON_SIZE_BYTES * 4
+ICON_CLEAR_OFFSET = IMG_RGB_METADATA_SIZE + ICON_SIZE_BYTES * 63
 
 BTN_CLOSE = 1
 BTN_SETUP = 2
@@ -66,6 +76,16 @@ start:
         stdcall dll.Load, @IMPORT
         or      eax, eax
         jnz     .exit
+
+        invoke  img.from_file, icons_file
+        test    eax, eax
+        jz      @f
+        mov     esi, eax
+        ; TODO alpha channel
+        invoke  img.to_rgb, esi
+        mov     [icons_rgb], eax
+        invoke  img.destroy, esi
+    @@:
 
         mcall   SF_SET_EVENTS_MASK, EVM_MOUSE + EVM_REDRAW + EVM_BUTTON + EVM_KEY
 
@@ -150,12 +170,6 @@ start:
         mcall   SF_STYLE_SETTINGS, SSF_GET_COLORS, sc, sizeof.system_colors
         mcall   SF_REDRAW, SSF_BEGIN_DRAW
 
-        ; fill palette for icons
-        mov     eax, [sc.work_text]
-        mov     [icons.palette], eax
-        mov     eax, [sc.work_light]
-        mov     [icons.palette + 4], eax
-
         mov     edx, [sc.work]
         or      edx, 0x33000000
         xor     esi, esi
@@ -196,36 +210,53 @@ start:
         jmp     .end_redraw
     @@:
 
-        mcall   SF_DEFINE_BUTTON, <1, 24>, <5, 24>, BTN_SETUP, [sc.work_light]
-        mcall   SF_DEFINE_BUTTON, <30, 24>, <5, 24>, BTN_CONN, [sc.work_light]
-        mcall   SF_DEFINE_BUTTON, <59, 24>, <5, 24>, BTN_CLEAR, [sc.work_light]
+        mcall   SF_DEFINE_BUTTON, <WIN_MARGIN, TOOL_BTN_SIZE>, \
+                                  <WIN_MARGIN, TOOL_BTN_SIZE>, \
+                                  BTN_SETUP, [sc.work_light]
+        mcall   SF_DEFINE_BUTTON, <WIN_MARGIN * 2 + TOOL_BTN_SIZE, TOOL_BTN_SIZE>, \
+                                  <WIN_MARGIN, TOOL_BTN_SIZE>, \
+                                  BTN_CONN, [sc.work_light]
+        mcall   SF_DEFINE_BUTTON, <WIN_MARGIN * 3 + TOOL_BTN_SIZE * 2, TOOL_BTN_SIZE>, \
+                                  <WIN_MARGIN, TOOL_BTN_SIZE>, \
+                                  BTN_CLEAR, [sc.work_light]
 
-        mcall   SF_PUT_IMAGE_EXT, icons, <20, 20>, <3, 7>, 1, icons.palette, 0
-        mcall   SF_PUT_IMAGE_EXT, icons + 180, <20, 20>, <61, 7>, 1, icons.palette, 0
+        mov     ebx, [icons_rgb]
+        test    ebx, ebx
+        jz      .no_icons
 
-        mov     ebx, icons + 60 ; disconnected icon
-        mov     al, [is_connected]
-        test    al, al
-        jz      @f
-        add     ebx, 60 ; connected icon
-    @@:
-        mcall   SF_PUT_IMAGE_EXT, , <20, 20>, <32, 7>, 1, icons.palette, 0
+        add     ebx, ICON_SETUP_OFFSET
+        mcall   SF_PUT_IMAGE_EXT, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
+                                  <WIN_MARGIN + 3, WIN_MARGIN + 3>, \
+                                  24, 0, 0
+        mov     ebx, [icons_rgb]
+        add     ebx, ICON_CONN_OFFSET
+        mcall   SF_PUT_IMAGE_EXT, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
+                                  <WIN_MARGIN * 2 + TOOL_BTN_SIZE + 3, WIN_MARGIN + 3>, \
+                                  24, 0, 0
+        mov     ebx, [icons_rgb]
+        add     ebx, ICON_CLEAR_OFFSET
+        mcall   SF_PUT_IMAGE_EXT, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
+                                  <WIN_MARGIN * 3 + TOOL_BTN_SIZE * 2 + 3, WIN_MARGIN + 3>, \
+                                  24, 0, 0
+    .no_icons:
 
         ; text view
-        mov     eax, [sc.work_light]
+        mov     eax, 0xffffff
         mov     [text_view.bg_color], eax
-        mov     eax, [sc.work_text]
+        mov     eax, [sc.work_graph]
         mov     [text_view.fg_color], eax
+        mov     eax, [sc.work_text]
+        mov     [text_view.text_color], eax
 
-        xor     eax, eax
+        mov     eax, WIN_MARGIN
         mov     [text_view.left], eax
-        add     eax, SCROLL_TOP
+        mov     eax, SCROLL_TOP
         mov     [text_view.top], eax
         mov     eax, [pi.client_box.width]
-        sub     eax, SCROLL_WIDTH + 4
+        sub     eax, SCROLL_WIDTH + WIN_MARGIN * 2 - 1
         mov     [text_view.width], eax
         mov     eax, [pi.client_box.height]
-        sub     eax, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 14 + SCROLL_TOP
+        sub     eax, FONT_HEIGHT + ED_HEIGHT + WIN_MARGIN * 4 + SCROLL_TOP
         mov     [text_view.height], eax
         stdcall text_view_draw, text_view
 
@@ -233,19 +264,19 @@ start:
 
         mov     [vscroll.all_redraw], 1
 
-        mov     eax, [sc.work]
+        mov     eax, [sc.work_light]
         mov     [vscroll.bg_color], eax
-        mov     eax, [sc.work_button]
+        mov     eax, [sc.work_light]
         mov     [vscroll.front_color], eax
-        mov     eax, [sc.work_text]
+        mov     eax, [sc.work_graph]
         mov     [vscroll.line_color], eax
         mov     [vscroll.type], 0
 
         mov     eax, [pi.client_box.width]
-        sub     eax, SCROLL_WIDTH + 2
+        sub     eax, SCROLL_WIDTH + WIN_MARGIN
         mov     [vscroll.x_pos], ax
         mov     eax, [pi.client_box.height]
-        sub     eax, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 14 + SCROLL_TOP
+        sub     eax, FONT_HEIGHT + ED_HEIGHT + WIN_MARGIN * 4 + SCROLL_TOP
         mov     [vscroll.y_size], ax
 
         call    update_vscroll
@@ -255,43 +286,46 @@ start:
 
         edit_boxes_set_sys_color main_win_edits_start, main_win_edits_end, sc
         mov     eax, [pi.client_box.width]
-        sub     eax, 46
+        sub     eax, SEND_BTN_WIDTH + WIN_MARGIN * 3
         mov     [ed_send.width], eax
         mov     eax, [pi.client_box.height]
-        sub     eax, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 10
+        sub     eax, FONT_HEIGHT + ED_HEIGHT + WIN_MARGIN * 3
         mov     [ed_send.top], eax
         invoke  edit_box_draw, ed_send
 
         mov     ebx, [pi.client_box.width]
-        sub     ebx, 42
+        sub     ebx, SEND_BTN_WIDTH + WIN_MARGIN
         shl     ebx, 16
-        add     ebx, 40
+        add     ebx, SEND_BTN_WIDTH
         mov     ecx, [pi.client_box.height]
-        sub     ecx, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 10
+        sub     ecx, FONT_HEIGHT + ED_HEIGHT + WIN_MARGIN * 3
         shl     ecx, 16
-        add     ecx, FONT_HEIGHT + 4
+        add     ecx, FONT_HEIGHT + 5
         mcall   SF_DEFINE_BUTTON, , , BTN_SEND, [sc.work_button]
 
         add     ebx, 4 shl 16
         mov     bx, word [pi.client_box.height]
-        sub     bx, 2 * FONT_HEIGHT + WIN_BORDER_WIDTH + 7
+        sub     bx, FONT_HEIGHT + ED_HEIGHT + WIN_MARGIN * 3 - 3
         mov     ecx, 0x90000000
         or      ecx, [sc.work_button_text]
         mcall   SF_DRAW_TEXT, , , send_label
 
         ; status bar
 
-        mov	    ebx, [pi.client_box.width]
+        mov     ebx, WIN_MARGIN shl 16
+        add	    ebx, [pi.client_box.width]
+        sub     ebx, WIN_MARGIN + 1
         mov     edx, [pi.client_box.height]
-        sub     edx, FONT_HEIGHT + WIN_BORDER_WIDTH
+        sub     edx, FONT_HEIGHT + WIN_MARGIN * 2
         mov     ecx, edx
         shl     ecx, 16
         mov     cx, dx
         mov     edx, [sc.work_graph]
         mcall   SF_DRAW_LINE
 
-        mov     ebx, [pi.client_box.height]
-        sub     ebx, FONT_HEIGHT
+        mov     ebx, WIN_MARGIN shl 16
+        add     ebx, [pi.client_box.height]
+        sub     ebx, FONT_HEIGHT + WIN_MARGIN
         mov     ecx, 0x90000000
         or      ecx, [sc.work_text]
         mov     edx, [status_msg]
@@ -401,29 +435,29 @@ proc show_conn_window
         mov     ecx, 0x90000000
         or      ecx, [sc.work_text]
         mov     edx, port_label
-        mcall   SF_DRAW_TEXT, <0, 13>
+        mcall   SF_DRAW_TEXT, <WIN_MARGIN, WIN_MARGIN + 2>
         mov     edx, baud_label
-        mcall   SF_DRAW_TEXT, <0, 45>
+        mcall   SF_DRAW_TEXT, <WIN_MARGIN, WIN_MARGIN * 2 + ED_HEIGHT + 2>
 
         edit_boxes_set_sys_color conn_win_edits_start, conn_win_edits_end, sc
         invoke  edit_box_draw, ed_port
         invoke  edit_box_draw, ed_baud
 
-        mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 137, 60>, \
-                                  <CONN_WIN_HEIGHT - 55, 24>, BTN_OK, \
+        mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 140, 60>, \
+                                  <CONN_WIN_HEIGHT - 58, 24>, BTN_OK, \
                                   [sc.work_button]
 
-        mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 71, 60>, \
-                                  <CONN_WIN_HEIGHT - 55, 24>, BTN_CANCEL, \
+        mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 74, 60>, \
+                                  <CONN_WIN_HEIGHT - 58, 24>, BTN_CANCEL, \
                                   [sc.work_button]
 
         mov     ecx, 0x90000000
         or      ecx, [sc.work_button_text]
-        mcall   SF_DRAW_TEXT, <CONN_WIN_WIDTH - 114, CONN_WIN_HEIGHT - 50>, , ok_label
+        mcall   SF_DRAW_TEXT, <CONN_WIN_WIDTH - 117, CONN_WIN_HEIGHT - 53>, , ok_label
 
         mov     ecx, 0x90000000
         or      ecx, [sc.work_button_text]
-        mcall   SF_DRAW_TEXT, <CONN_WIN_WIDTH - 65, CONN_WIN_HEIGHT - 50>, , cancel_label
+        mcall   SF_DRAW_TEXT, <CONN_WIN_WIDTH - 68, CONN_WIN_HEIGHT - 53>, , cancel_label
 
         mcall   SF_REDRAW, SSF_END_DRAW
         ret
@@ -577,7 +611,8 @@ endp
 align 16
 @IMPORT:
 
-library box_lib, 'box_lib.obj'
+library box_lib, 'box_lib.obj',\
+        libimg,  'libimg.obj'
 
 import  box_lib,\
         edit_box_draw,          'edit_box_draw',\
@@ -587,16 +622,22 @@ import  box_lib,\
         scrollbar_draw,         'scrollbar_v_draw',\
         scrollbar_mouse,        'scrollbar_v_mouse'
 
+import  libimg,\
+        libimg.init,            'lib_init',\
+        img.from_file,          'img_from_file',\
+        img.to_rgb,             'img_to_rgb',\
+        img.destroy,            'img_destroy'
+
 conn_win_edits_start:
-ed_port         edit_box 80, CONN_WIN_WIDTH - 80 - 11, 10, 0xffffff, 0x6f9480, \
+ed_port         edit_box 80, CONN_WIN_WIDTH - 80 - 15, WIN_MARGIN, 0xffffff, 0x6f9480, \
                          0, 0, 0x10000000, 6, ed_port_val, mouse_dd, \
                          ed_focus + ed_figure_only
-ed_baud         edit_box 80, CONN_WIN_WIDTH - 80 - 11, 42, 0xffffff, 0x6f9480, \
+ed_baud         edit_box 80, CONN_WIN_WIDTH - 80 - 15, WIN_MARGIN * 2 + ED_HEIGHT, 0xffffff, 0x6f9480, \
                          0, 0, 0x10000000, 6, ed_baud_val, mouse_dd, \
                          ed_figure_only
 conn_win_edits_end:
 main_win_edits_start:
-ed_send         edit_box 0, 0, 0, 0xffffff, 0x6f9480, \
+ed_send         edit_box 0, WIN_MARGIN, 0, 0xffffff, 0x6f9480, \
                          0, 0, 0x10000000, ED_SEND_MAX_LEN - 1, ed_send_val, mouse_dd, \
                          ed_focus + ed_always_focus, 0, 0
 main_win_edits_end:
@@ -607,20 +648,24 @@ text_view       TEXT_VIEW
 is_connected    db 0
 is_conn_win_opened db 0
 app_name        db 'kterm', 0
-conn_win_name   db 'Settings', 0
+conn_win_name   db 'kterm - settings', 0
 port_label      db 'Port:', 0
 baud_label      db 'Baud:', 0
 ok_label        db 'Ok', 0
 cancel_label    db 'Cancel', 0
 send_label      db 'Send', 0
-status_msg      dd status_ver
 status_ver      db 'v0.1.1', 0
+icons_file      db '/sys/icons16.png', 0
 err_port        db 'Invalid serial port.', 0
 err_busy        db 'The port is already in use.', 0
 err_conf        db 'Invalid port configuration.', 0
 err_unknown     db 'An unknown error occured.', 0
 err_driver      db 'Error loading driver serial.sys.', 0
+
+align 4
+status_msg      dd status_ver
 port_num        dd 0
+icons_rgb       dd 0
 port_conf:
         dd      port_conf_end - port_conf
         dd      9600
@@ -631,41 +676,20 @@ if __DEBUG__ eq 1
     include_debug_strings
 end if
 
-; https://javl.github.io/image2cpp/
-icons:
-    ; 'icons', 20x80px
-    db 0xff, 0xff, 0xf0, 0xfc, 0x7f, 0xf0, 0xf8, 0x3f, 0xf0, 0xf8, 0x1f, 0xf0, 0xfe, 0x1f, 0xf0, 0xdf
-    db 0x1f, 0xf0, 0x8e, 0x1f, 0xf0, 0xa4, 0x3f, 0xf0, 0x90, 0x1f, 0xf0, 0xc8, 0x0f, 0xf0, 0xe0, 0x07
-    db 0xf0, 0xfe, 0x43, 0xf0, 0xff, 0x21, 0xf0, 0xff, 0x90, 0xf0, 0xff, 0xc8, 0x70, 0xff, 0xe4, 0x30
-    db 0xff, 0xf0, 0x70, 0xff, 0xf8, 0xf0, 0xff, 0xfd, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff
-    db 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xfe, 0xf7, 0xf0, 0xfc, 0xf3, 0xf0, 0xf8, 0xf1
-    db 0xf0, 0xf8, 0xf1, 0xf0, 0xf0, 0x78, 0xf0, 0x80, 0x78, 0x10, 0x80, 0x78, 0x10, 0xf0, 0x78, 0xf0
-    db 0xf8, 0xf1, 0xf0, 0xf8, 0xf1, 0xf0, 0xfc, 0xf3, 0xf0, 0xfe, 0xf7, 0xf0, 0xff, 0xff, 0xf0, 0xff
-    db 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff
-    db 0xf0, 0xff, 0xff, 0xf0, 0xff, 0x9f, 0xf0, 0xff, 0x0f, 0xf0, 0xfe, 0x07, 0xf0, 0xfe, 0x07, 0xf0
-    db 0xfc, 0x03, 0xf0, 0x80, 0x00, 0x10, 0x80, 0x00, 0x10, 0xfc, 0x03, 0xf0, 0xfe, 0x07, 0xf0, 0xfe
-    db 0x07, 0xf0, 0xff, 0x0f, 0xf0, 0xff, 0x9f, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff
-    db 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xe3, 0xf0
-    db 0xff, 0xc9, 0xf0, 0xff, 0x9c, 0xf0, 0xff, 0x3e, 0x70, 0xfe, 0x7f, 0x70, 0xfc, 0x7f, 0x70, 0xf9
-    db 0x3e, 0x70, 0xf3, 0x9c, 0xf0, 0xe7, 0xc9, 0xf0, 0xef, 0xe3, 0xf0, 0xe7, 0xe7, 0xf0, 0xf3, 0xcf
-    db 0xf0, 0xf9, 0x9f, 0xf0, 0xfc, 0x00, 0x70, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0, 0xff, 0xff, 0xf0
-.palette:
-    dd 0xffffff
-    dd 0x000000
-
+align 4
 i_end:
+mouse_dd        dd ?
+conn_win_pid    dd ?
+port_handle     dd ?
+rx_buf_cnt      dd ?
+tx_buf_cnt      dd ?
 ed_port_val     rb 7
 ed_baud_val     rb 7
 ed_send_header  rb LINE_HEADER_LEN
 ed_send_val     rb ED_SEND_MAX_LEN
-mouse_dd        dd ?
-conn_win_pid    dd ?
-port_handle     dd ?
 port_status     rb PORT_STATUS_LEN
 rx_header       rb LINE_HEADER_LEN
 rx_buf          rb RX_BUF_SIZE
-rx_buf_cnt      dd ?
-tx_buf_cnt      dd ?
 sc              system_colors
 pi              process_information
 conn_win_stack  rb CONN_WIN_STACK_SIZE
