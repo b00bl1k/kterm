@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Properly handle port disconnection
+
 ### Changed
 - Increase UI margins for better appearance with wide-border skins
 - Use system `icons16` instead of embedded icons

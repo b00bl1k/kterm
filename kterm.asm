@@ -98,7 +98,7 @@ start:
         cmp     [is_connected], 0
         jz      @f
         mov     eax, SF_WAIT_EVENT_TIMEOUT
-        mov     ebx, 100
+        mov     ebx, 10
     @@:
         mcall
         cmp     eax, EV_REDRAW
@@ -506,7 +506,7 @@ proc btn_conn_click
         lea     eax, [port_conf]
         lea     ebx, [port_handle]
         stdcall serial_port_open, [port_num], eax, ebx
-        mov     [status_msg], status_ver
+        mov     [status_msg], noconn_msg
         test    eax, eax
         jz      .opened
         mov     [status_msg], err_port
@@ -544,7 +544,7 @@ proc btn_conn_click
     .close:
         stdcall serial_port_close, [port_handle]
         and     [is_connected], 0
-        mov     [status_msg], status_ver
+        mov     [status_msg], noconn_msg
     .exit:
         ret
 endp
@@ -552,7 +552,8 @@ endp
 proc check_port
         mov     [rx_buf_cnt], RX_BUF_SIZE - 1
         stdcall serial_port_read, [port_handle], rx_buf, rx_buf_cnt
-        ; TODO check eax for errors
+        test    eax, eax
+        jnz     .error
         mov     eax, [rx_buf_cnt]
         test    eax, eax
         jz      .exit
@@ -566,6 +567,13 @@ proc check_port
         stdcall text_view_draw, text_view
         call    update_vscroll
         invoke  scrollbar_draw, vscroll
+        jmp     .exit
+    .error:
+        ; the port was closed
+        mov     eax, noconn_msg
+        mov     [status_msg], eax
+        mov     [is_connected], 0
+        call    start.draw_window ; TODO redraw status only
     .exit:
         ret
 endp
@@ -647,14 +655,14 @@ text_view       TEXT_VIEW
 
 is_connected    db 0
 is_conn_win_opened db 0
-app_name        db 'kterm', 0
+app_name        db 'kterm v0.1.1', 0
 conn_win_name   db 'kterm - settings', 0
 port_label      db 'Port:', 0
 baud_label      db 'Baud:', 0
 ok_label        db 'Ok', 0
 cancel_label    db 'Cancel', 0
 send_label      db 'Send', 0
-status_ver      db 'v0.1.1', 0
+noconn_msg      db 'Not connected', 0
 icons_file      db '/sys/icons16.png', 0
 err_port        db 'Invalid serial port.', 0
 err_busy        db 'The port is already in use.', 0
@@ -663,7 +671,7 @@ err_unknown     db 'An unknown error occured.', 0
 err_driver      db 'Error loading driver serial.sys.', 0
 
 align 4
-status_msg      dd status_ver
+status_msg      dd noconn_msg
 port_num        dd 0
 icons_rgb       dd 0
 port_conf:
