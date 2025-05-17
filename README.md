@@ -4,13 +4,13 @@ Simple serial terminal for KolibriOS.
 
 ![screenshot](screenshot.png)
 
-# Requirements
+## Requirements
 
 - [Fasm](https://flatassembler.net/) 1.7x
 - [Tup](https://gittup.org/tup/) build system (optional)
 - KolibriOS commit `#5593d344cd` or newer
 
-# Build instructions
+## Build instructions
 
 1. Clone the KolibriOS repository:
 

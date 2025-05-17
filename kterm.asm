@@ -50,8 +50,11 @@ BTN_SEND = 5
 BTN_OK = 2
 BTN_CANCEL = 3
 
-__DEBUG__ = 0
-__DEBUG_LEVEL__ = 0
+L_DBG = 0
+L_ERR = 1
+
+__DEBUG__ = 1
+__DEBUG_LEVEL__ = L_ERR
 
 include '../../proc32.inc'
 include '../../macros.inc'
@@ -59,6 +62,7 @@ include '../../KOSfuncs.inc'
 include '../../dll.inc'
 include '../../debug-fdo.inc'
 include '../../develop/libraries/box_lib/trunk/box_lib.mac'
+include '../../develop/libraries/libs-dev/libimg/libimg.inc'
 include '../../../drivers/serial/common.inc'
 include 'textview.inc'
 include 'utils.inc'
@@ -69,6 +73,7 @@ start:
         call    serial_port_init
         test    eax, eax
         jnz     @f
+        DEBUGF  L_ERR, "%s\n", err_driver
         mov     eax, err_driver
         mov     [status_msg], eax
     @@:
@@ -81,7 +86,6 @@ start:
         test    eax, eax
         jz      @f
         mov     esi, eax
-        ; TODO alpha channel
         invoke  img.to_rgb, esi
         mov     [icons_rgb], eax
         invoke  img.destroy, esi
@@ -212,32 +216,29 @@ start:
 
         mcall   SF_DEFINE_BUTTON, <WIN_MARGIN, TOOL_BTN_SIZE>, \
                                   <WIN_MARGIN, TOOL_BTN_SIZE>, \
-                                  BTN_SETUP, [sc.work_light]
+                                  BTN_SETUP, 0xffffff
         mcall   SF_DEFINE_BUTTON, <WIN_MARGIN * 2 + TOOL_BTN_SIZE, TOOL_BTN_SIZE>, \
                                   <WIN_MARGIN, TOOL_BTN_SIZE>, \
-                                  BTN_CONN, [sc.work_light]
+                                  BTN_CONN, 0xffffff
         mcall   SF_DEFINE_BUTTON, <WIN_MARGIN * 3 + TOOL_BTN_SIZE * 2, TOOL_BTN_SIZE>, \
                                   <WIN_MARGIN, TOOL_BTN_SIZE>, \
-                                  BTN_CLEAR, [sc.work_light]
+                                  BTN_CLEAR, 0xffffff
 
         mov     ebx, [icons_rgb]
         test    ebx, ebx
         jz      .no_icons
 
         add     ebx, ICON_SETUP_OFFSET
-        mcall   SF_PUT_IMAGE_EXT, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
-                                  <WIN_MARGIN + 3, WIN_MARGIN + 3>, \
-                                  24, 0, 0
+        mcall   SF_PUT_IMAGE, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
+                                <WIN_MARGIN + 3, WIN_MARGIN + 3>
         mov     ebx, [icons_rgb]
         add     ebx, ICON_CONN_OFFSET
-        mcall   SF_PUT_IMAGE_EXT, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
-                                  <WIN_MARGIN * 2 + TOOL_BTN_SIZE + 3, WIN_MARGIN + 3>, \
-                                  24, 0, 0
+        mcall   SF_PUT_IMAGE, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
+                                <WIN_MARGIN * 2 + TOOL_BTN_SIZE + 3, WIN_MARGIN + 3>
         mov     ebx, [icons_rgb]
         add     ebx, ICON_CLEAR_OFFSET
-        mcall   SF_PUT_IMAGE_EXT, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
-                                  <WIN_MARGIN * 3 + TOOL_BTN_SIZE * 2 + 3, WIN_MARGIN + 3>, \
-                                  24, 0, 0
+        mcall   SF_PUT_IMAGE, , <TOOL_ICON_SIZE, TOOL_ICON_SIZE>, \
+                                <WIN_MARGIN * 3 + TOOL_BTN_SIZE * 2 + 3, WIN_MARGIN + 3>
     .no_icons:
 
         ; text view
@@ -305,7 +306,7 @@ start:
 
         add     ebx, 4 shl 16
         mov     bx, word [pi.client_box.height]
-        sub     bx, FONT_HEIGHT + ED_HEIGHT + WIN_MARGIN * 3 - 3
+        sub     bx, FONT_HEIGHT + ED_HEIGHT + WIN_MARGIN * 3 - 4
         mov     ecx, 0x90000000
         or      ecx, [sc.work_button_text]
         mcall   SF_DRAW_TEXT, , , send_label
@@ -403,7 +404,7 @@ proc show_conn_window
         mov     [port_num], ebx
         mov     esi, ed_baud_val
         call    str_to_uint
-        mov     [port_conf + 4], ebx
+        mov     [port_conf + SP_CONF.baudrate], ebx
     @@:
         and     [is_conn_win_opened], 0
         mcall   SF_TERMINATE_PROCESS
@@ -658,17 +659,17 @@ is_conn_win_opened db 0
 app_name        db 'kterm v0.1.1', 0
 conn_win_name   db 'kterm - settings', 0
 port_label      db 'Port:', 0
-baud_label      db 'Baud:', 0
+baud_label      db 'Baudrate:', 0
 ok_label        db 'Ok', 0
 cancel_label    db 'Cancel', 0
 send_label      db 'Send', 0
 noconn_msg      db 'Not connected', 0
 icons_file      db '/sys/icons16.png', 0
-err_port        db 'Invalid serial port.', 0
-err_busy        db 'The port is already in use.', 0
-err_conf        db 'Invalid port configuration.', 0
-err_unknown     db 'An unknown error occured.', 0
-err_driver      db 'Error loading driver serial.sys.', 0
+err_port        db 'Invalid serial port', 0
+err_busy        db 'The port is already in use', 0
+err_conf        db 'Invalid port configuration', 0
+err_unknown     db 'An unknown error occured', 0
+err_driver      db 'Error loading driver serial.sys', 0
 
 align 4
 status_msg      dd noconn_msg
@@ -680,9 +681,7 @@ port_conf:
         db      8, 1, SERIAL_CONF_PARITY_NONE, SERIAL_CONF_FLOW_CTRL_NONE
 port_conf_end:
 
-if __DEBUG__ eq 1
-    include_debug_strings
-end if
+include_debug_strings
 
 align 4
 i_end:
