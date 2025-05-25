@@ -33,8 +33,6 @@ ED_SEND_MAX_LEN = 256
 
 KEY_ENTER = 13
 
-CONN_WIN_STACK_SIZE = 1024
-
 IMG_RGB_METADATA_SIZE = 8
 ICON_SIZE_BYTES = TOOL_ICON_SIZE * TOOL_ICON_SIZE * 3
 ICON_SETUP_OFFSET = IMG_RGB_METADATA_SIZE + ICON_SIZE_BYTES * 60
@@ -62,8 +60,9 @@ include '../../KOSfuncs.inc'
 include '../../dll.inc'
 include '../../debug-fdo.inc'
 include '../../develop/libraries/box_lib/trunk/box_lib.mac'
-include '../../develop/libraries/libs-dev/libimg/libimg.inc'
 include '../../../drivers/serial/common.inc'
+
+include 'settings.inc'
 include 'textview.inc'
 include 'utils.inc'
 
@@ -73,11 +72,20 @@ start:
         call    serial_port_init
         test    eax, eax
         jnz     @f
-        DEBUGF  L_ERR, "%s\n", err_driver
+        DEBUGF  L_ERR, "kterm: %s\n", err_driver
         mov     eax, err_driver
         mov     [status_msg], eax
     @@:
-
+        push    0
+        stdcall serial_port_get_version, esp
+        pop     eax
+        DEBUGF  L_DBG, "kterm: serial driver version 0x%x\n", eax
+        shr     eax, 16
+        cmp     ax, SERIAL_COMPATIBLE_API_VER
+        jle     @f
+        mov     eax, err_driver_ver
+        mov     [status_msg], eax
+    @@:
         stdcall dll.Load, @IMPORT
         or      eax, eax
         jnz     .exit
@@ -137,7 +145,7 @@ start:
     @@:
         cmp     ah, BTN_SETUP
         jne     @f
-        call    show_conn_window
+        call    show_settings_win
         jmp     .loop
     @@:
         cmp     ah, BTN_CLEAR
@@ -336,134 +344,6 @@ start:
         mcall   SF_REDRAW, SSF_END_DRAW
         ret
 
-CONN_WIN_WIDTH = 200
-CONN_WIN_HEIGHT = 250
-proc show_conn_window
-        cmp     [is_conn_win_opened], 1
-        jne     @f
-        mcall   SF_SYSTEM, SSF_GET_THREAD_SLOT, [conn_win_pid]
-        xchg    eax, ecx
-        mcall   SF_SYSTEM, SSF_FOCUS_WINDOW
-        ret
-    @@:
-        mcall   SF_CREATE_THREAD, 1, .thread, conn_win_stack + CONN_WIN_STACK_SIZE
-        cmp     eax, -1
-        je      @f
-        mov     [conn_win_pid], eax
-        mov     [is_conn_win_opened], 1
-    @@:
-        ret
-    .thread:
-        mcall   SF_SET_EVENTS_MASK, EVM_MOUSE + EVM_MOUSE_FILTER + EVM_REDRAW + EVM_BUTTON + EVM_KEY
-
-        mov     eax, [port_num]
-        mov     ecx, 10
-        mov     edi, ed_port_val
-        call    int_to_str
-        and     byte [edi], 0
-        mov     esi, ed_port_val
-        call    strlen
-        mov     [ed_port.size], eax
-        mov     [ed_port.pos], eax
-
-        mov     eax, [port_conf + 4]
-        mov     ecx, 10
-        mov     edi, ed_baud_val
-        call    int_to_str
-        and     byte [edi], 0
-        mov     esi, ed_baud_val
-        call    strlen
-        mov     [ed_baud.size], eax
-
-        call    .draw_window
-    .loop:
-        mcall   SF_WAIT_EVENT
-        dec     eax
-        jz      .win
-        dec     eax
-        jz      .key
-        dec     eax
-        jz      .btn
-        invoke  edit_box_mouse, ed_port
-        invoke  edit_box_mouse, ed_baud
-        jmp     .loop
-    .win:
-        call    .draw_window
-        jmp     .loop
-    .key:
-        mcall   SF_GET_KEY
-        invoke  edit_box_key, ed_port
-        invoke  edit_box_key, ed_baud
-        jmp     .loop
-    .btn:
-        mcall   SF_GET_BUTTON
-        cmp     ah, BTN_OK
-        jne     @f
-        mov     esi, ed_port_val
-        call    str_to_uint
-        mov     [port_num], ebx
-        mov     esi, ed_baud_val
-        call    str_to_uint
-        mov     [port_conf + SP_CONF.baudrate], ebx
-    @@:
-        and     [is_conn_win_opened], 0
-        mcall   SF_TERMINATE_PROCESS
-
-    .draw_window:
-        mcall   SF_REDRAW, SSF_BEGIN_DRAW
-
-        mov     edx, [sc.work]
-        or      edx, 0x34000000
-        mov     esi, [sc.work]
-        mov     edi, conn_win_name
-
-        mov     ebx, [pi.box.width]
-        shr     ebx, 1
-        add     ebx, [pi.box.left]
-        sub     ebx, CONN_WIN_WIDTH / 2
-        shl     ebx, 16
-        add     ebx, CONN_WIN_WIDTH
-
-        mov     ecx, [pi.box.height]
-        shr     ecx, 1
-        add     ecx, [pi.box.top]
-        sub     ecx, CONN_WIN_HEIGHT / 2
-        shl     ecx, 16
-        add     ecx, CONN_WIN_HEIGHT
-
-        mcall   SF_CREATE_WINDOW
-
-        mov     ecx, 0x90000000
-        or      ecx, [sc.work_text]
-        mov     edx, port_label
-        mcall   SF_DRAW_TEXT, <WIN_MARGIN, WIN_MARGIN + 2>
-        mov     edx, baud_label
-        mcall   SF_DRAW_TEXT, <WIN_MARGIN, WIN_MARGIN * 2 + ED_HEIGHT + 2>
-
-        edit_boxes_set_sys_color conn_win_edits_start, conn_win_edits_end, sc
-        invoke  edit_box_draw, ed_port
-        invoke  edit_box_draw, ed_baud
-
-        mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 140, 60>, \
-                                  <CONN_WIN_HEIGHT - 58, 24>, BTN_OK, \
-                                  [sc.work_button]
-
-        mcall   SF_DEFINE_BUTTON, <CONN_WIN_WIDTH - 74, 60>, \
-                                  <CONN_WIN_HEIGHT - 58, 24>, BTN_CANCEL, \
-                                  [sc.work_button]
-
-        mov     ecx, 0x90000000
-        or      ecx, [sc.work_button_text]
-        mcall   SF_DRAW_TEXT, <CONN_WIN_WIDTH - 117, CONN_WIN_HEIGHT - 53>, , ok_label
-
-        mov     ecx, 0x90000000
-        or      ecx, [sc.work_button_text]
-        mcall   SF_DRAW_TEXT, <CONN_WIN_WIDTH - 68, CONN_WIN_HEIGHT - 53>, , cancel_label
-
-        mcall   SF_REDRAW, SSF_END_DRAW
-        ret
-endp
-
 proc send_text
         ; check for empty string
         cmp     byte [ed_send_val], 0
@@ -475,9 +355,13 @@ proc send_text
         call    make_line_header
         mov     esi, ed_send_val
         call    strlen
+        call    .append_ending
         mov     [tx_buf_cnt], eax
         stdcall serial_port_write, [port_handle], ed_send_val, tx_buf_cnt
         ; TODO check for errors and actual size of written data
+        mov     esi, ed_send_val
+        call    escape_chars
+        mov     byte [esi], 0
         stdcall text_view_append_line, text_view, ed_send_header, TV_FLAG_AUTOSCROLL
         xor     eax, eax
         push    eax
@@ -488,6 +372,22 @@ proc send_text
         call    update_vscroll
         invoke  scrollbar_draw, vscroll
     .exit:
+        ret
+
+    .append_ending:
+        cmp     [text_append], SETTINGS_APPEND_NONE
+        je      .nothing
+        cmp     [text_append], SETTINGS_APPEND_LF
+        je      .append_lf
+        mov     byte [esi], 0x0d
+        inc     esi
+        inc     eax
+    .append_lf:
+        mov     byte [esi], 0x0a
+        inc     esi
+        inc     eax
+    .nothing:
+        mov     byte [esi], 0
         ret
 endp
 
@@ -523,7 +423,8 @@ proc btn_conn_click
         jmp     .exit
     .opened:
         mov     [is_connected], 1
-        mov     esi, port_label
+        ; make string for status
+        mov     esi, port_lbl
         mov     edi, port_status
         mov     ecx, 4
         cld
@@ -533,13 +434,16 @@ proc btn_conn_click
         call    int_to_str
         mov     al, ' '
         stosb
-        mov     eax, [port_conf + 4]
+        mov     eax, [port_conf + SP_CONF.baudrate]
         mov     ecx, 10
         call    int_to_str
-        mov     eax, ' 8n1'
-        stosd
-        xor     al, al
+        mov     al, ' '
         stosb
+        mov     al, [port_conf + SP_CONF.word_size]
+        add     al, '0'
+        stosb
+        mov     eax, 'n1'
+        stosd
         mov     [status_msg], port_status
         jmp     .exit
     .close:
@@ -555,11 +459,11 @@ proc check_port
         stdcall serial_port_read, [port_handle], rx_buf, rx_buf_cnt
         test    eax, eax
         jnz     .error
-        mov     eax, [rx_buf_cnt]
-        test    eax, eax
+        mov     ecx, [rx_buf_cnt]
+        test    ecx, ecx
         jz      .exit
-        ; TODO escape non-print chars
-        lea     esi, [rx_buf + eax]
+        mov     esi, rx_buf
+        call    escape_chars
         mov     byte [esi], 0
         xor     eax, eax
         mov     edi, rx_header
@@ -579,44 +483,6 @@ proc check_port
         ret
 endp
 
-proc make_line_header
-; eax = 0 - rx, 1 - tx
-; edi = dest buf
-        push    eax
-        mcall   SF_GET_SYS_TIME
-        mov     ebx, eax
-        mov     ecx, 3
-        ; BCD timestamp to string
-    .loop:
-        mov     al, bl
-        shr     al, 4
-        add     al, '0'
-        stosb
-        mov     al, bl
-        and     al, 0x0f
-        add     al, '0'
-        stosb
-        dec     ecx
-        jz      .done
-        mov     al, ':'
-        stosb
-        shr     ebx, 8
-        jmp     .loop
-    .done:
-        mov     al, ' '
-        stosb
-        mov     al, '<'
-        pop     ebx
-        test    ebx, ebx
-        jz      @f
-        mov     al, '>'
-    @@:
-        stosb
-        mov     al, ' '
-        stosb
-        ret
-endp
-
 align 16
 @IMPORT:
 
@@ -629,7 +495,9 @@ import  box_lib,\
         edit_box_mouse,         'edit_box_mouse',\
         edit_box_set_text,      'edit_box_set_text',\
         scrollbar_draw,         'scrollbar_v_draw',\
-        scrollbar_mouse,        'scrollbar_v_mouse'
+        scrollbar_mouse,        'scrollbar_v_mouse',\
+        option_box_draw,        'option_box_draw',\
+        option_box_mouse,       'option_box_mouse'
 
 import  libimg,\
         libimg.init,            'lib_init',\
@@ -637,17 +505,10 @@ import  libimg,\
         img.to_rgb,             'img_to_rgb',\
         img.destroy,            'img_destroy'
 
-conn_win_edits_start:
-ed_port         edit_box 80, CONN_WIN_WIDTH - 80 - 15, WIN_MARGIN, 0xffffff, 0x6f9480, \
-                         0, 0, 0x10000000, 6, ed_port_val, mouse_dd, \
-                         ed_focus + ed_figure_only
-ed_baud         edit_box 80, CONN_WIN_WIDTH - 80 - 15, WIN_MARGIN * 2 + ED_HEIGHT, 0xffffff, 0x6f9480, \
-                         0, 0, 0x10000000, 6, ed_baud_val, mouse_dd, \
-                         ed_figure_only
-conn_win_edits_end:
+
 main_win_edits_start:
 ed_send         edit_box 0, WIN_MARGIN, 0, 0xffffff, 0x6f9480, \
-                         0, 0, 0x10000000, ED_SEND_MAX_LEN - 1, ed_send_val, mouse_dd, \
+                         0, 0, 0x10000000, ED_SEND_MAX_LEN - 3, ed_send_val, mouse_dd, \
                          ed_focus + ed_always_focus, 0, 0
 main_win_edits_end:
 
@@ -655,13 +516,7 @@ vscroll         scrollbar SCROLL_WIDTH, 0, 0, SCROLL_TOP, SCROLL_WIDTH, 0, 0, 0,
 text_view       TEXT_VIEW
 
 is_connected    db 0
-is_conn_win_opened db 0
-app_name        db 'kterm v0.1.1', 0
-conn_win_name   db 'kterm - settings', 0
-port_label      db 'Port:', 0
-baud_label      db 'Baudrate:', 0
-ok_label        db 'Ok', 0
-cancel_label    db 'Cancel', 0
+app_name        db 'kterm v0.2.0', 0
 send_label      db 'Send', 0
 noconn_msg      db 'Not connected', 0
 icons_file      db '/sys/icons16.png', 0
@@ -670,6 +525,7 @@ err_busy        db 'The port is already in use', 0
 err_conf        db 'Invalid port configuration', 0
 err_unknown     db 'An unknown error occured', 0
 err_driver      db 'Error loading driver serial.sys', 0
+err_driver_ver  db 'Error serial driver version', 0
 
 align 4
 status_msg      dd noconn_msg
@@ -678,20 +534,21 @@ icons_rgb       dd 0
 port_conf:
         dd      port_conf_end - port_conf
         dd      9600
-        db      8, 1, SERIAL_CONF_PARITY_NONE, SERIAL_CONF_FLOW_CTRL_NONE
+        db      8, SERIAL_CONF_STOP_BITS_1, SERIAL_CONF_PARITY_NONE, SERIAL_CONF_FLOW_CTRL_NONE
 port_conf_end:
+text_append     db SETTINGS_APPEND_LF
+
+IncludeIGlobals
 
 include_debug_strings
 
 align 4
 i_end:
+IncludeUGlobals
 mouse_dd        dd ?
-conn_win_pid    dd ?
 port_handle     dd ?
 rx_buf_cnt      dd ?
 tx_buf_cnt      dd ?
-ed_port_val     rb 7
-ed_baud_val     rb 7
 ed_send_header  rb LINE_HEADER_LEN
 ed_send_val     rb ED_SEND_MAX_LEN
 port_status     rb PORT_STATUS_LEN
@@ -699,4 +556,3 @@ rx_header       rb LINE_HEADER_LEN
 rx_buf          rb RX_BUF_SIZE
 sc              system_colors
 pi              process_information
-conn_win_stack  rb CONN_WIN_STACK_SIZE

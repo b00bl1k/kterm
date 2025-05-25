@@ -71,6 +71,7 @@ proc strlen
         mov     eax, esi
         sub     eax, ebx
         dec     eax
+        dec     esi
         pop     ebx
         ret
 endp
@@ -84,5 +85,61 @@ proc strcpy
         stosb
         test    al, al
         jnz     @b
+        ret
+endp
+
+proc escape_chars
+; esi = source
+; ecx = length
+    .loop:
+        mov     al, [esi]
+        cmp     al, 0x20
+        jb      .escape
+        cmp     al, 0x80
+        jae     .escape
+        jmp     .no_escape
+    .escape:
+        mov     byte [esi], '.'
+    .no_escape:
+        inc     esi
+        loop    .loop
+        ret
+endp
+
+proc make_line_header
+; eax = 0 - rx, 1 - tx
+; edi = dest buf
+        push    eax
+        mcall   SF_GET_SYS_TIME
+        mov     ebx, eax
+        mov     ecx, 3
+        ; BCD timestamp to string
+    .loop:
+        mov     al, bl
+        shr     al, 4
+        add     al, '0'
+        stosb
+        mov     al, bl
+        and     al, 0x0f
+        add     al, '0'
+        stosb
+        dec     ecx
+        jz      .done
+        mov     al, ':'
+        stosb
+        shr     ebx, 8
+        jmp     .loop
+    .done:
+        mov     al, ' '
+        stosb
+        mov     al, '<'
+        pop     ebx
+        test    ebx, ebx
+        jz      @f
+        mov     al, '>'
+    @@:
+        stosb
+        mov     al, ' '
+        stosb
         ret
 endp

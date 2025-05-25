@@ -1,11 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2025-05-25
+
+### Added
+- Option to append LF or CRLF when sending data
+- Option to configure data bits
 
 ### Fixed
 - Properly handle port disconnection
 
 ### Changed
+- Check serial driver version at startup
 - Increase UI margins for better appearance with wide-border skins
 - Use system `icons16` instead of embedded icons
 

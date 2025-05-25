@@ -8,7 +8,7 @@ Simple serial terminal for KolibriOS.
 
 - [Fasm](https://flatassembler.net/) 1.7x
 - [Tup](https://gittup.org/tup/) build system (optional)
-- KolibriOS commit `#5593d344cd` or newer
+- KolibriOS commit `#2dfb3ddff3` or newer
 
 ## Build instructions
 
